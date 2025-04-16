@@ -27,7 +27,7 @@ from roboball_plant.create_ball_plant import (
 from roboball_plant.joint_modifiers import StictionModel
 
 
-def plot_test_data(ax,log_directory, plot_peaks=False):
+def plot_test_data(ax,log_directory):
     peaks = None
     first_time = None
     data = pd.read_csv(log_directory, header=0)
@@ -35,20 +35,11 @@ def plot_test_data(ax,log_directory, plot_peaks=False):
     data[['timestamp']] = data[['timestamp']] *1e-9
 
     peaks, _ = find_peaks(data['ball_roll.velocity'], height=0.05, distance=50)
-    idx = 2 # the manually selected peak to strt the sim at
+    idx = 2 # the manually selected peak to start the sim at
     first_time = data['timestamp'].iloc[peaks].values
-    ax[0].plot(data[['timestamp']].values- first_time[idx],data[['ball_roll.position']].values, label="pipe angle data")
-    ax[2].plot(data[['timestamp']].values- first_time[idx],data[['roll_joint.position']].values, label="Steer_Angle")
-    ax[1].plot(data[['timestamp']].values- first_time[idx],data[['ball_roll.velocity']].values, label="pipe_vel")
-    ax[3].plot(data[['timestamp']].values- first_time[idx],data[['roll_joint.velocity']].values, label="Steer_vel")
-    init_pipe_angle = data['ball_roll.position'].iloc[peaks].values
-    init_pipe_velocity = data["ball_roll.velocity"].iloc[peaks].values
-    init_pend_angle = data["roll_joint.position"].iloc[peaks].values
-    init_pend_veloctiy = data["roll_joint.velocity"].iloc[peaks].values
-
-    if plot_peaks:
-        ax[1].plot(first_time, init_pipe_velocity, 'x')
-    return first_time[idx], init_pipe_angle[idx], init_pipe_velocity[idx], init_pend_angle[idx], init_pend_veloctiy[idx]
+    ax.plot(data[['timestamp']].values- first_time[idx],data[['ball_roll.position']].values, label="pipe angle data")
+    
+    return first_time[idx]
 
 def plot_prav_model(ax, init_conditions, tf, configs=(None,)):
     # set up the drake sim
@@ -172,9 +163,10 @@ def plot_drake_model(ax, initi_conditions, tf, config, new_proximity=None, meshc
     if "point" in config:
         config_str = f"{config} "
     elif "soft" in config:
-        if not new_proximity == None:
-            config_str = f"{config} \n modulus (Pa): {new_proximity[0]:e} - dissipation (s/m): {new_proximity[1]}"
-        config_str = f"{config} \n modulus (Pa): 1.8e6 - dissipation (s/m): 0.5"
+        if new_proximity:
+            config_str = f"{config} \n modulus (Pa): {np.round(new_proximity[0],1):e} - dissipation (s/m): {new_proximity[1]}"
+        else:
+            config_str = f"{config} \n modulus (Pa): 1.8e6 - dissipation (s/m): 0.5"
 
     # plot pipe angle
     ax.plot(drake_log.sample_times(), drake_data[:, 2], label=f'drake - '+ config_str)
@@ -185,30 +177,25 @@ def plot_drake_model(ax, initi_conditions, tf, config, new_proximity=None, meshc
 
 if __name__=="__main__":
     meshcat = Meshcat()
-    log_diretory = "./roboball_plant/data/data2-conv.csv"
+    log_diretory = "./roboball_plant/data/dynamic_data.csv"
     fig, ax_point = plt.subplots()
     fig, ax_soft =  plt.subplots()
     fig, ax_prav =  plt.subplots()
-    # make sure ax are in the form:
-    # ax = [phi, dphi, theta, dtheta]
+   
     # pull the initial condition from the datafile
-    _,_,_,_,_ = plot_test_data(ax_prav, log_diretory) # same log same function dont need those vals
-    _,_,_,_,_ = plot_test_data(ax_soft, log_diretory) # same log same function dont need those vals
-    peak_times, init_pipe_angle, init_pipe_velocity, init_pend_angle, init_pend_veloctiy = plot_test_data(ax_point, log_diretory)
+    _ = plot_test_data(ax_prav, log_diretory) # same log same function dont need those vals
+    _ = plot_test_data(ax_soft, log_diretory) # same log same function dont need those vals
+    peak_times = plot_test_data(ax_point, log_diretory)
     # # make sure IC's are in the form:
     # [phi, dphi, theta, dtheta]
     # pulled from data 
     q0 = [-0.4, 0, 1, 0]
+    tuned_proximity = [1.2e5, 0.65]
     tf = 5 # final integrating time
-
-    # ax_point[0].plot(0, init_pipe_angle, 'x')
-    # ax_point[1].plot(0, init_pipe_velocity, 'x')
-    # ax_point[2].plot(0, init_pend_angle, 'x')
-    # ax_point[3].plot(0, init_pend_veloctiy, 'x')
 
     ax_prav = plot_prav_model(ax_prav, q0, tf,  ("tau_flat",))
     ax_prav = plot_drake_model(ax_prav, q0, tf, ("point",))
-    ax_prav = plot_drake_model(ax_prav, q0, tf, ("soft", "stiction", "lumpy"), [1.0e5, 0.5], meshcat=meshcat)
+    ax_prav = plot_drake_model(ax_prav, q0, tf, ("soft", "stiction"), tuned_proximity)
 
 
     ax_point = plot_prav_model(ax_point, q0, tf,  ("point", ))
@@ -219,11 +206,10 @@ if __name__=="__main__":
 
     ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction"))
     ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction", "lumpy"))
-    ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction"), [1.0e5, 0.5])
-    ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction", "lumpy"), [1.0e5, 0.5], meshcat=meshcat)
+    ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction"), tuned_proximity, meshcat=meshcat)
+    ax_soft = plot_drake_model(ax_soft, q0, tf, ("soft", "stiction", "lumpy"), tuned_proximity)
 
     
-    # Optional: copy labels, titles, etc.
     ax_soft.set_title("Responses of Models with Hydroelastic Contact")
     ax_soft.set_xlabel("time (s)")
     ax_soft.set_ylabel("angle (rad)")
